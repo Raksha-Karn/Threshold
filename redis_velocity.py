@@ -1,4 +1,6 @@
 import redis
+import uuid
+import time
 
 redis_client = redis.Redis(
     host="localhost",
@@ -12,14 +14,29 @@ def _velocity_key(user_id: str, window: int) -> str:
 
 def incr_txn_count(user_id: str, window:int = 60) -> int:
     key = _velocity_key(user_id, window)
-    count = redis_client.incr(key)
-    if count == 1:
-        redis_client.expire(key, window)
-    return count
+
+    now = time.time()
+    txn_event_id = str(uuid.uuid4())
+    redis_client.zadd(key, {txn_event_id: now})
+    cutoff = now - window
+    redis_client.zremrangebyscore(key, 0, cutoff)
+    redis_client.expire(key, window)
+    return redis_client.zcard(key)
+
+    # count = redis_client.incr(key)
+    # if count == 1:
+    #     redis_client.expire(key, window)
+    # return count
 
 def get_txn_count(user_id: str, window: int = 60) -> str:
     key = _velocity_key(user_id=user_id, window=window)
-    value = redis_client.get(key)
-    if value is None:
-        return 0
-    return int(value)
+
+    now = time.time()
+    cutoff = now - window
+    redis_client.zremrangebyscore(key, 0, cutoff)
+    return redis_client.zcard(key)
+
+    # value = redis_client.get(key)
+    # if value is None:
+    #     return 0
+    # return int(value)
