@@ -1,7 +1,8 @@
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
 
 df = pd.read_csv("data/transaction_features.csv", encoding="utf-8")
 
@@ -37,7 +38,56 @@ df.to_csv("data/transactions_with_anomalies.csv", index=False)
 print("Saved file with anomaly score")
 
 y_true = df["is_fraud"]
-y_pred = (df["anomaly_label"] == -1).astype(int)
+y_score = df["fraud_score"]
 
-print(confusion_matrix(y_true, y_pred))
-print(classification_report(y_true, y_pred))
+auc = roc_auc_score(y_true=y_true, y_score=y_score)
+print("AUC:" , auc)
+
+if auc >= 0.82:
+    print("Target met")
+else:
+    print("Target not met")
+
+plt.figure(figsize=(10, 6))
+
+plt.hist(
+    df[df["is_fraud"] == 0]["fraud_score"],
+    bins=50,
+    alpha=0.6,
+    label="Legit",
+    density=True
+)
+
+plt.hist(
+    df[df["is_fraud"] == 1]["fraud_score"],
+    bins=50,
+    alpha=0.6,
+    label="Fraud",
+    density=True
+)
+
+plt.xlabel("Fraud Score Higher = More Suspicious")
+plt.ylabel("Density")
+plt.title(f"Fraud Score Distribution: Fraud vs Legit | AUC = {auc:.3f}")
+plt.legend()
+plt.tight_layout()
+plt.savefig("data/anomaly_score_distribution.png", dpi=300)
+plt.close()
+
+fpr, tpr, thresholds = roc_curve(y_true, y_score)
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr, tpr, label=f"Isolation Forest AUC = {auc:.3f}")
+plt.plot([0, 1], [0, 1], linestyle="--", label="Random Guess")
+
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+plt.legend()
+plt.tight_layout()
+plt.savefig("data/roc_curve.png", dpi=300)
+plt.close()
+
+print("Saved plots:")
+print("data/anomaly_score_distribution.png")
+print("data/roc_curve.png")
