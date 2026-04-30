@@ -22,6 +22,25 @@ CITIES = [
 FRAUD_MERCHANTS = ["crypto", "atm", "electronics", "jewelry", "gaming"]
 LEGIT_MERCHANTS = ["grocery", "fuel", "restaurant", "fashion", "pharmacy", "travel"]
 
+NUM_FRAUD_MERCHANTS = 300
+NUM_LEGIT_MERCHANTS = 700
+
+FRAUD_MERCHANT_POOL = [
+    {
+        "merchant_id": f"fraud_merchant_{i}",
+        "merchant_type": random.choice(FRAUD_MERCHANTS)
+    }
+    for i in range(1, NUM_FRAUD_MERCHANTS + 1)
+]
+
+LEGIT_MERCHANT_POOL = [
+    {
+        "merchant_id": f"legit_merchant_{i}",
+        "merchant_type": random.choice(LEGIT_MERCHANTS)
+    }
+    for i in range(1, NUM_LEGIT_MERCHANTS + 1)
+]
+
 def random_timestamp(days_back=90, fraud=False):
     now = datetime.now(timezone.utc)
     if fraud:
@@ -71,12 +90,14 @@ def generate_transactions(is_fraud):
 
     if is_fraud:
         device_id = f"device_{random.randint(1, 1200)}"
-        merchant_type = random.choice(FRAUD_MERCHANTS)
+        merchant = random.choice(FRAUD_MERCHANT_POOL)
     else:
         device_id = f"device_{random.randint(1, NUM_DEVICES)}"
-        merchant_type = random.choice(LEGIT_MERCHANTS)
+        merchant = random.choice(LEGIT_MERCHANT_POOL)
 
     location = random_location(fraud=is_fraud)
+    merchant_id = merchant["merchant_id"]
+    merchant_type = merchant["merchant_type"]
 
     return {
         "transaction_id": str(uuid.uuid4()),
@@ -86,6 +107,7 @@ def generate_transactions(is_fraud):
         "lat": location["lat"], 
         "lon": location["lon"],
         "merchant_type": merchant_type,
+        "merchant_id": merchant_id,
         "timestamp": random_timestamp(fraud=is_fraud),
         "device_id": device_id,
         "is_fraud": int(is_fraud)
@@ -101,6 +123,7 @@ def main():
         "lat", 
         "lon", 
         "merchant_type", 
+        "merchant_id",
         "timestamp", 
         "device_id", 
         "is_fraud"
