@@ -1,0 +1,17 @@
+{
+    "sequence_length": 5,
+    "min_user_history": 5,
+    "cold_start_confidence": 0.3,
+    "feature_columns": [
+        "amount_zscore",
+        "amount_vs_user_mean",
+        "txn_count_in_last_1h",
+        "txn_count_in_last_24h",
+        "is_new_merchant",
+        "hour_of_day",
+        "day_of_week",
+        "anomaly_score"
+    ],
+    "input_size": 8,
+    "target_type": "next_transaction_feature_reconstruction"
+}
