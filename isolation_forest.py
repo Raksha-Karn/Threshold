@@ -31,15 +31,16 @@ model = IsolationForest(
 
 df["anomaly_label"] = model.fit_predict(X=X_scaled)
 
+df["anomaly_score"] = model.decision_function(X=X_scaled)
+df["fraud_score"] = -df["anomaly_score"]
 joblib.dump({
     "model": model,
     "scaler": scaler,
-    "features": features
+    "features": features,
+    "score_min": df["fraud_score"].min(),
+    "score_max": df["fraud_score"].max()
 }, "models/isolation_forest.pkl"
 )
-
-df["anomaly_score"] = model.decision_function(X=X_scaled)
-df["fraud_score"] = -df["anomaly_score"]
 
 suspicious_transactions = df[df["anomaly_label"] == -1]
 print(suspicious_transactions.sort_values("anomaly_score").head(20))
