@@ -3,6 +3,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
 import matplotlib.pyplot as plt
+import joblib
 
 df = pd.read_csv("data/transaction_features.csv", encoding="utf-8")
 
@@ -29,6 +30,14 @@ model = IsolationForest(
 )
 
 df["anomaly_label"] = model.fit_predict(X=X_scaled)
+
+joblib.dump({
+    "model": model,
+    "scaler": scaler,
+    "features": features
+}, "models/isolation_forest.pkl"
+)
+
 df["anomaly_score"] = model.decision_function(X=X_scaled)
 df["fraud_score"] = -df["anomaly_score"]
 
