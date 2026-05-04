@@ -27,7 +27,6 @@ FINAL_FEATURE_COLUMNS = [
     "txns_last_24h",
     "geo_distance_from_home",
     "is_international",
-    "merchant_risk_score",
     "amount_round_number",
     "card_present_flag",
 ]
@@ -140,27 +139,6 @@ def add_card_present_proxy(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
-def add_merchant_risk_score(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
-    global_fraud_rate = df["is_fraud"].mean()
-
-    merchant_previous_fraud_count = (
-        df.groupby("merchant_type")["is_fraud"]
-        .cumsum()
-        - df["is_fraud"]
-    )
-    merchant_previous_txn_count = (
-        df.groupby("merchant_type")
-        .cumcount()
-    )
-    df["merchant_risk_score"] = (
-        merchant_previous_fraud_count / merchant_previous_txn_count.replace(0, np.nan)
-    )
-    df["merchant_risk_score"] = df["merchant_risk_score"].fillna(global_fraud_rate)
-    return df
-
 def validate_features(df: pd.DataFrame) -> None:
     missing_features = [
         column for column in FINAL_FEATURE_COLUMNS
@@ -192,7 +170,6 @@ def build_velocity_rf_features() -> None:
     df = add_velocity_features(df)
     df = add_geo_distance_from_home(df)
     df = add_is_international_proxy(df)
-    df = add_merchant_risk_score(df)
     df = add_amount_round_number(df)
     df = add_card_present_proxy(df)
 
