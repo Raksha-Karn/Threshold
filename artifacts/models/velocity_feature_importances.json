@@ -1,0 +1,16 @@
+{
+    "txns_last_1h": 0.00033345605887464305,
+    "txns_last_24h": 0.001486826592327695,
+    "amount_sum_last_1h": 0.009596958102356518,
+    "amount_sum_last_24h": 0.008940555381668682,
+    "amount_mean_last_24h": 0.010125511697907924,
+    "amount_max_last_24h": 0.011483022254757926,
+    "unique_merchants_last_24h": 0.0010229092091882915,
+    "unique_devices_last_24h": 0.000995089259251272,
+    "is_new_device": 0.003616356865416219,
+    "is_new_city": 0.001215280649052575,
+    "geo_distance_from_home": 0.06463976652252709,
+    "card_present_flag": 0.8860251927728133,
+    "is_international": 0.00040055369565343877,
+    "amount_round_number": 0.00011852093820446221
+}
