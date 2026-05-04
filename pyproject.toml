@@ -16,6 +16,7 @@ dependencies = [
     "redis>=7.4.0",
     "scikit-learn>=1.8.0",
     "torch>=2.11.0",
+    "torch-geometric>=2.7.0",
     "torchvision>=0.26.0",
     "twilio>=9.10.5",
     "uvicorn>=0.46.0",
