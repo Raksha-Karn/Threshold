@@ -97,17 +97,18 @@ class VelocityRulesAgent:
             transaction.get("timestamp_epoch", time.time())
         )
 
-        recent_1h = self._get_recent_transactions(
-            user_id=user_id,
-            current_timestamp=current_timestamp,
-            window_seconds=60 * 60,
-        )
-
         recent_24h = self._get_recent_transactions(
-            user_id=user_id,
-            current_timestamp=current_timestamp,
-            window_seconds=60 * 60 * 24,
-        )
+        user_id=user_id,
+        current_timestamp=current_timestamp,
+        window_seconds=60 * 60 * 24,
+    )
+
+        one_hour_ago = current_timestamp - 60 * 60
+
+        recent_1h = [
+            txn for txn in recent_24h
+            if float(txn.get("timestamp", 0.0)) >= one_hour_ago
+        ]
 
         amounts_1h = [
             float(txn.get("amount", 0.0))
