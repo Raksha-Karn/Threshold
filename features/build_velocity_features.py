@@ -134,3 +134,25 @@ def add_card_present_proxy(df: pd.DataFrame) -> pd.DataFrame:
         lambda value: int(any(keyword in value for keyword in physical_merchant_keywords))
     )
     return df
+
+def add_merchant_risk_score(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    global_fraud_rate = df["is_fraud"].mean()
+
+    merchant_previous_fraud_count = (
+        df.groupby("merchant_type")["is_fraud"]
+        .cumsum()
+        - df["is_fraud"]
+    )
+    merchant_previous_txn_count = (
+        df.groupby("merchant_type")
+        .cumcount()
+    )
+    df["merchant_risk_score"] = (
+        merchant_previous_fraud_count / merchant_previous_txn_count.replace(0, np.nan)
+    )
+    df["merchant_risk_score"] = df["merchant_risk_score"].fillna(global_fraud_rate)
+    return df
+
