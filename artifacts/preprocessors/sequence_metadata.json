@@ -1,5 +1,5 @@
 {
-    "sequence_length": 5,
+    "sequence_length": 30,
     "min_user_history": 5,
     "cold_start_confidence": 0.3,
     "feature_columns": [

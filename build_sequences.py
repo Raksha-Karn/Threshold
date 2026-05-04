@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 
-SEQUENCE_LENGTH = 5
+SEQUENCE_LENGTH = 30
 COLD_START_CONFIDENCE = 0.3
 MIN_USER_HISTORY = 5
 FEATURE_COLUMNS = [

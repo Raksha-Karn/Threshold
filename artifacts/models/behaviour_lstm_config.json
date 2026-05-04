@@ -1,0 +1,11 @@
+{
+    "input_size": 8,
+    "hidden_size": 128,
+    "num_layers": 2,
+    "dropout": 0.3,
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "epochs": 50,
+    "model_type": "BehaviourLSTMPredictor",
+    "score_type": "mse_reconstruction_error"
+}
