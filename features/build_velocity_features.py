@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-RAW_DATA_PATH = Path("data/raw/transactions_with_anomalies.csv")
+INPUT_PATH = Path("data/raw/transactions_with_anomalies.csv")
 OUTPUT_PATH = Path("data/processed/velocity_features.parquet")
 
 MIN_HOME_TRANSACTIONS = 5
@@ -94,8 +94,13 @@ def add_geo_distance_from_home(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_velocity_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["txns_last_1h"] = df["txn_count_in_last_1h"].fillna(0).astype(float)
-    df["txns_last_24h"] = df["txn_count_in_last_24h"].fillna(0).astype(float)
+    df["txns_last_1h"] = (
+    df["txn_count_in_last_1h"].fillna(0).astype(float) - 1
+    ).clip(lower=0)
+
+    df["txns_last_24h"] = (
+        df["txn_count_in_last_24h"].fillna(0).astype(float) - 1
+    ).clip(lower=0)
     return df
 
 def add_amount_round_number(df: pd.DataFrame) -> pd.DataFrame:
@@ -156,3 +161,76 @@ def add_merchant_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     df["merchant_risk_score"] = df["merchant_risk_score"].fillna(global_fraud_rate)
     return df
 
+def validate_features(df: pd.DataFrame) -> None:
+    missing_features = [
+        column for column in FINAL_FEATURE_COLUMNS
+        if column not in df.columns
+    ]
+    if missing_features:
+        raise ValueError(f"Missing final features: {missing_features}")
+    
+    if df[FINAL_FEATURE_COLUMNS].isna().any().any():
+        missing_counts = df[FINAL_FEATURE_COLUMNS].isna().sum()
+        raise ValueError(f"NaN values found in final features:\n{missing_counts}")
+    
+def build_velocity_rf_features() -> None:
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(INPUT_PATH)
+
+    missing_input_columns = [
+        column for column in REQUIRED_INPUT_COLUMNS
+        if column not in df.columns
+    ]
+
+    if missing_input_columns:
+        raise ValueError(f"Missing required input columns: {missing_input_columns}")
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["is_fraud"] = df["is_fraud"].astype(int)
+
+    df = add_velocity_features(df)
+    df = add_geo_distance_from_home(df)
+    df = add_is_international_proxy(df)
+    df = add_merchant_risk_score(df)
+    df = add_amount_round_number(df)
+    df = add_card_present_proxy(df)
+
+    df["label"] = df["is_fraud"].astype(int)
+
+    output_columns = [
+        "timestamp",
+        "transaction_id",
+        "user_id",
+        "amount",
+        "city",
+        "lat",
+        "lon",
+        "merchant_type",
+        "merchant_id",
+        "device_id",
+        *FINAL_FEATURE_COLUMNS,
+        "label",
+    ]
+
+    output_df = df[output_columns].copy()
+    output_df[FINAL_FEATURE_COLUMNS] = (
+        output_df[FINAL_FEATURE_COLUMNS]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+    )
+
+    validate_features(output_df)
+    output_df.to_parquet(OUTPUT_PATH, index=False)
+
+    print(f"Saved Random Forest feature dataset to: {OUTPUT_PATH}")
+    print(f"Rows: {len(output_df)}")
+    print(f"Fraud rate: {output_df['label'].mean():.4f}")
+    print("Feature summary:")
+    print(output_df[FINAL_FEATURE_COLUMNS].describe())
+    print("First rows:")
+    print(output_df.head())
+
+
+if __name__ == "__main__":
+    build_velocity_rf_features()
