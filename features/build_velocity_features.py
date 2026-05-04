@@ -28,7 +28,6 @@ FINAL_FEATURE_COLUMNS = [
     "geo_distance_from_home",
     "is_international",
     "amount_round_number",
-    "card_present_flag",
 ]
 
 def haversine_distance_km(
@@ -120,24 +119,24 @@ def add_is_international_proxy(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_card_present_proxy(df: pd.DataFrame) -> pd.DataFrame:
-    physical_merchant_keywords = [
-        "grocery",
-        "restaurant",
-        "fuel",
-        "gas",
-        "retail",
-        "pharmacy",
-        "supermarket",
-        "store",
-        "hotel",
-        "travel",
-    ]
-    merchant_type_text = df["merchant_type"].fillna("").astype(str).str.lower()
-    df["card_present_flag"] = merchant_type_text.apply(
-        lambda value: int(any(keyword in value for keyword in physical_merchant_keywords))
-    )
-    return df
+# def add_card_present_proxy(df: pd.DataFrame) -> pd.DataFrame:
+#     physical_merchant_keywords = [
+#         "grocery",
+#         "restaurant",
+#         "fuel",
+#         "gas",
+#         "retail",
+#         "pharmacy",
+#         "supermarket",
+#         "store",
+#         "hotel",
+#         "travel",
+#     ]
+#     merchant_type_text = df["merchant_type"].fillna("").astype(str).str.lower()
+#     df["card_present_flag"] = merchant_type_text.apply(
+#         lambda value: int(any(keyword in value for keyword in physical_merchant_keywords))
+#     )
+#     return df
 
 def validate_features(df: pd.DataFrame) -> None:
     missing_features = [
@@ -171,7 +170,6 @@ def build_velocity_rf_features() -> None:
     df = add_geo_distance_from_home(df)
     df = add_is_international_proxy(df)
     df = add_amount_round_number(df)
-    df = add_card_present_proxy(df)
 
     df["label"] = df["is_fraud"].astype(int)
 
