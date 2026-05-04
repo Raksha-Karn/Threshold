@@ -25,6 +25,14 @@ REQUIRED_INPUT_COLUMNS = [
 FINAL_FEATURE_COLUMNS = [
     "txns_last_1h",
     "txns_last_24h",
+    "amount_sum_last_1h",
+    "amount_sum_last_24h",
+    "amount_mean_last_24h",
+    "amount_max_last_24h",
+    "unique_merchants_last_24h",
+    "unique_devices_last_24h",
+    "is_new_device",
+    "is_new_city",
     "geo_distance_from_home",
     "is_international",
     "amount_round_number",
@@ -101,6 +109,99 @@ def add_velocity_features(df: pd.DataFrame) -> pd.DataFrame:
     ).clip(lower=0)
     return df
 
+def add_rich_velocity_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df = df.sort_values(["user_id", "timestamp"])
+
+    result_frames = []
+
+    for user_id, user_df in df.groupby("user_id", group_keys=False):
+        user_df = user_df.sort_values("timestamp").copy()
+        user_df = user_df.set_index("timestamp")
+
+        user_df["amount_sum_last_1h"] = (
+            user_df["amount"]
+            .rolling("1h", closed="left")
+            .sum()
+            .fillna(0)
+        )
+
+        user_df["amount_sum_last_24h"] = (
+            user_df["amount"]
+            .rolling("24h", closed="left")
+            .sum()
+            .fillna(0)
+        )
+
+        user_df["amount_mean_last_24h"] = (
+            user_df["amount"]
+            .rolling("24h", closed="left")
+            .mean()
+            .fillna(0)
+        )
+
+        user_df["amount_max_last_24h"] = (
+            user_df["amount"]
+            .rolling("24h", closed="left")
+            .max()
+            .fillna(0)
+        )
+
+        timestamps = user_df.index.to_list()
+        merchant_ids = user_df["merchant_id"].astype(str).to_list()
+        device_ids = user_df["device_id"].astype(str).to_list()
+
+        unique_merchants_last_24h = []
+        unique_devices_last_24h = []
+
+        for current_index, current_time in enumerate(timestamps):
+            window_start = current_time - pd.Timedelta(hours=24)
+
+            previous_indices = [
+                index
+                for index in range(current_index)
+                if timestamps[index] >= window_start
+            ]
+
+            merchants_in_window = {
+                merchant_ids[index]
+                for index in previous_indices
+            }
+
+            devices_in_window = {
+                device_ids[index]
+                for index in previous_indices
+            }
+
+            unique_merchants_last_24h.append(len(merchants_in_window))
+            unique_devices_last_24h.append(len(devices_in_window))
+
+        user_df["unique_merchants_last_24h"] = unique_merchants_last_24h
+        user_df["unique_devices_last_24h"] = unique_devices_last_24h
+
+        seen_devices = set()
+        is_new_device_values = []
+
+        for device_id in user_df["device_id"].astype(str):
+            is_new_device_values.append(int(device_id not in seen_devices))
+            seen_devices.add(device_id)
+
+        user_df["is_new_device"] = is_new_device_values
+
+        seen_cities = set()
+        is_new_city_values = []
+
+        for city in user_df["city"].astype(str):
+            is_new_city_values.append(int(city not in seen_cities))
+            seen_cities.add(city)
+
+        user_df["is_new_city"] = is_new_city_values
+
+        user_df = user_df.reset_index()
+        result_frames.append(user_df)
+
+    return pd.concat(result_frames, ignore_index=True)
+
 def add_amount_round_number(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     amount = df["amount"].fillna(0)
@@ -167,6 +268,7 @@ def build_velocity_rf_features() -> None:
     df["is_fraud"] = df["is_fraud"].astype(int)
 
     df = add_velocity_features(df)
+    df = add_rich_velocity_features(df)
     df = add_geo_distance_from_home(df)
     df = add_is_international_proxy(df)
     df = add_amount_round_number(df)
