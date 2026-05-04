@@ -12,6 +12,14 @@ class VelocityRulesAgent:
         self.feature_importances = artifact.get("feature_importances", {})
 
     def score(self, transaction_features: dict) -> float:
+        missing_features = [
+            feature for feature in self.features
+            if feature not in transaction_features
+        ]
+
+        if missing_features:
+            raise ValueError(f"Missing velocity features: {missing_features}")
+
         X = pd.DataFrame([transaction_features])
         X = X.reindex(columns=self.features)
         X = X.fillna(0)
