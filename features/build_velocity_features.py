@@ -91,3 +91,46 @@ def add_geo_distance_from_home(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["geo_distance_from_home"] = df["geo_distance_from_home"].fillna(0.0)
     return df
+
+def add_velocity_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["txns_last_1h"] = df["txn_count_in_last_1h"].fillna(0).astype(float)
+    df["txns_last_24h"] = df["txn_count_in_last_24h"].fillna(0).astype(float)
+    return df
+
+def add_amount_round_number(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    amount = df["amount"].fillna(0)
+    df["amount_round_number"] = (
+        (amount % 10 == 0)
+        | (amount % 50 == 0)
+        | (amount % 100 == 0)
+    ).astype(int)
+    return df
+
+def add_is_international_proxy(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["is_international"] = (
+        df["geo_distance_from_home"] >= INTERNATIONAL_DISTANCE_KM_THRESHOLD
+    ).astype(int)
+    return df
+
+
+def add_card_present_proxy(df: pd.DataFrame) -> pd.DataFrame:
+    physical_merchant_keywords = [
+        "grocery",
+        "restaurant",
+        "fuel",
+        "gas",
+        "retail",
+        "pharmacy",
+        "supermarket",
+        "store",
+        "hotel",
+        "travel",
+    ]
+    merchant_type_text = df["merchant_type"].fillna("").astype(str).str.lower()
+    df["card_present_flag"] = merchant_type_text.apply(
+        lambda value: int(any(keyword in value for keyword in physical_merchant_keywords))
+    )
+    return df
