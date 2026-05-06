@@ -5,7 +5,8 @@ import mlflow
 from sklearn.metrics import precision_recall_curve, roc_auc_score
 import matplotlib.pyplot as plt
 from pathlib import Path
-
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
 from agents.synthesis_agent import SynthesisAgent
 from agents.txn_type import TransactionType
 
@@ -70,11 +71,16 @@ def load_data(sample_size: int = 2500):
 
 
 async def calibrate_thresholds():
+    print("Initializing SynthesisAgent...")
     agent = SynthesisAgent()
-    transactions, labels = load_data(sample_size=2500)
+    print("Agent initialized. Loading data...")
+    transactions, labels = load_data(sample_size=100)
+    print(f"Loaded {len(transactions)} transactions")
 
     scores = []
-    for txn in transactions:
+    for i, txn in enumerate(transactions):
+        if i % 10 == 0:
+            print(f"[Progress] Scoring transaction {i+1}/{len(transactions)}")
         result = await agent.score_transaction(txn)
         scores.append(result.score)
 
@@ -82,6 +88,7 @@ async def calibrate_thresholds():
     positive = labels == 1
     negative = labels == 0
 
+    print("[4] Computing metrics...")
     precision, recall, _ = precision_recall_curve(labels, scores)
     roc_auc = roc_auc_score(labels, scores)
 
@@ -98,6 +105,7 @@ async def calibrate_thresholds():
     selected_threshold = selected_thresholds[-1] if selected_thresholds else thresholds[0]
     print(f"Selected threshold with FPR < 2%: {selected_threshold}")
 
+    print("[5] Logging to MLflow...")
     mlflow.set_experiment("synthesis_calibration")
     with mlflow.start_run():
         mlflow.log_metric("roc_auc", float(roc_auc))
@@ -107,6 +115,7 @@ async def calibrate_thresholds():
         mlflow.log_param("selected_threshold", selected_threshold)
         mlflow.log_param("sample_size", int(len(scores)))
 
+    print("[6] Plotting results...")
     plt.figure()
     plt.plot(recall, precision, marker=".")
     plt.xlabel("Recall")
@@ -122,6 +131,7 @@ async def calibrate_thresholds():
     plt.title("Synthesis score distribution")
     plt.savefig("calibration_score_histogram.png")
     mlflow.log_artifact("calibration_score_histogram.png")
+    print("[7] Done!")
 
 
 if __name__ == "__main__":
