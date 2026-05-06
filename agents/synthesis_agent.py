@@ -77,11 +77,20 @@ class SynthesisAgent:
 
     def _time_of_day_prior(self, timestamp) -> float:
         if timestamp:
-            hour = timestamp.hour
-            if 2 <= hour < 3:
-                return 0.05
-            elif 9 <= hour < 18:
-                return -0.05
+            from datetime import datetime
+            # Handle both string and datetime objects
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                except (ValueError, AttributeError):
+                    return 0.0
+            
+            if hasattr(timestamp, 'hour'):
+                hour = timestamp.hour
+                if 2 <= hour < 3:
+                    return 0.05
+                elif 9 <= hour < 18:
+                    return -0.05
         return 0.0
 
     def _compute_verdict(self, score: float) -> str:
