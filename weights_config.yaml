@@ -2,23 +2,41 @@ txn_weights:
   HIGH_VALUE_P2P:
     graph_agent: 0.40
     behaviour_agent: 0.30
-    rf_agent: 0.20
+    velocity_agent: 0.20
     anomaly_agent: 0.10
+    geo_agent: 0.0
 
   POS_RETAIL:
-    rf_agent: 0.40
+    velocity_agent: 0.40
     anomaly_agent: 0.30
     graph_agent: 0.20
     behaviour_agent: 0.10
+    geo_agent: 0.0
 
   REMITTANCE:
     graph_agent: 0.45
     geo_agent: 0.30
     behaviour_agent: 0.15
-    rf_agent: 0.10
+    velocity_agent: 0.10
+    anomaly_agent: 0.0
 
   QR_CODE:
     behaviour_agent: 0.40
-    rf_agent: 0.30
+    velocity_agent: 0.30
     anomaly_agent: 0.20
     graph_agent: 0.10
+    geo_agent: 0.0
+
+  ATM:
+    anomaly_agent: 0.50
+    velocity_agent: 0.30
+    graph_agent: 0.15
+    behaviour_agent: 0.05
+    geo_agent: 0.0
+
+  ONLINE_MERCHANT:
+    behaviour_agent: 0.35
+    velocity_agent: 0.35
+    graph_agent: 0.20
+    anomaly_agent: 0.10
+    geo_agent: 0.0
