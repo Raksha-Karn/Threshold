@@ -12,3 +12,4 @@ wheels/
 .pytest_cache
 data/
 mlartifacts/
+mlflow.db
