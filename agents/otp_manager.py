@@ -15,8 +15,9 @@ class OTPManager:
         redis_port: int = 6379,
         redis_db: int = 0,
         ttl_seconds: int = DEFAULT_TTL,
+        redis_client: Optional[redis.Redis] = None,
     ):
-        self.redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+        self.redis_client = redis_client or redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
         self.ttl_seconds = ttl_seconds
 
     def _code_key(self, txn_id: str, channel: str) -> str:
