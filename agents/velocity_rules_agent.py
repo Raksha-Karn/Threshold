@@ -75,20 +75,14 @@ class VelocityRulesAgent:
             "city": str(transaction.get("city", "")),
         }
 
-        self.redis_client.zadd(
-            key,
-            {json.dumps(redis_record): current_timestamp},
-        )
+        pipeline = self.redis_client.pipeline()
+        pipeline.zadd(key, {json.dumps(redis_record): current_timestamp})
 
         oldest_allowed_timestamp = current_timestamp - self.history_ttl_seconds
 
-        self.redis_client.zremrangebyscore(
-            key,
-            min=0,
-            max=oldest_allowed_timestamp,
-        )
-
-        self.redis_client.expire(key, self.history_ttl_seconds)
+        pipeline.zremrangebyscore(key, min=0, max=oldest_allowed_timestamp)
+        pipeline.expire(key, self.history_ttl_seconds)
+        pipeline.execute()
 
     def _build_realtime_features(self, transaction: dict) -> dict:
         user_id = str(transaction["user_id"])
