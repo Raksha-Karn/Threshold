@@ -1,5 +1,4 @@
 import os
-import json
 from typing import Optional, Any
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import Response, HTMLResponse
@@ -13,10 +12,6 @@ import sys
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from monitoring.metrics import (
     REQUEST_LATENCY,
-    FRAUD_SCORE_HISTOGRAM,
-    VERDICT_COUNTER,
-    OTP_SUCCESS_COUNTER,
-    OTP_FAILURE_COUNTER,
 )
 from agents.synthesis_agent import SynthesisAgent
 from agents.anomaly_agent import AnomalyAgent
@@ -74,9 +69,9 @@ def get_orchestrator(
         synthesis_agent = SynthesisAgent()
         anomaly_agent = AnomalyAgent()
         behaviour_agent = BehaviourAgent()
-        risk_agent = RiskAgent()
+        risk_agent = RiskAgent(anomaly_agent=anomaly_agent, behaviour_agent=behaviour_agent)
         velocity_agent = VelocityRulesAgent()
-        otp_manager = OTPManager()
+        otp_manager = OTPManager(redis_client=redis)
         sms_agent = SMSAgent()
         email_agent = EmailAgent()
         otp_interlock = OTPInterlock(
@@ -102,6 +97,7 @@ class TransactionRequest(BaseModel):
     amount: float
     merchant_id: str
     user_id: str
+    txn_type: str = "POS_RETAIL"
     merchant_type: Optional[str] = None
     device_id: Optional[str] = None
     phone: Optional[str] = None
@@ -141,9 +137,6 @@ async def process_transaction(
         from datetime import datetime, timezone
         txn["timestamp"] = datetime.now(timezone.utc).isoformat()
     
-    redis = get_redis()
-    redis.setex(f"txn:{txn.get('transaction_id', 'temp')}:context", 3600, json.dumps(txn))
-    
     result = await orchestrator.process_transaction(txn)
     return result
 
@@ -180,20 +173,45 @@ def dashboard() -> HTMLResponse:
       <head>
         <title>Fraud Orchestrator Dashboard</title>
         <style>
-          body { font-family: Arial, sans-serif; margin: 24px; }
-          .metric { margin-bottom: 16px; }
+          body { font-family: Arial, sans-serif; margin: 24px; color: #17202a; }
+          .grid { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 12px; max-width: 920px; }
+          .metric { border: 1px solid #d7dde5; border-radius: 8px; padding: 16px; }
+          .label { color: #5d6d7e; font-size: 13px; margin-bottom: 8px; }
+          .value { font-size: 28px; font-weight: 700; }
           pre { background: #f4f4f4; padding: 16px; border-radius: 8px; }
         </style>
       </head>
       <body>
         <h1>Fraud Orchestrator Dashboard</h1>
-        <div class="metric"><strong>Metrics Endpoint:</strong> <a href="/metrics">/metrics</a></div>
-        <div class="metric"><strong>Latest Metrics</strong></div>
+        <div class="grid">
+          <div class="metric"><div class="label">Fraud Block Rate</div><div class="value" id="fraud-rate">0%</div></div>
+          <div class="metric"><div class="label">P95 Latency Target</div><div class="value" id="latency">800ms</div></div>
+          <div class="metric"><div class="label">OTP Completion</div><div class="value" id="otp-rate">0%</div></div>
+        </div>
+        <p><strong>Metrics Endpoint:</strong> <a href="/metrics">/metrics</a></p>
         <pre id="metrics">Loading metrics...</pre>
         <script>
+          function metricValue(text, name, labels = '') {
+            const escaped = labels ? '\\\\{' + labels + '\\\\}' : '';
+            const match = text.match(new RegExp('^' + name + escaped + '\\\\s+([0-9.]+)$', 'm'));
+            return match ? Number(match[1]) : 0;
+          }
+
           async function loadMetrics() {
             const response = await fetch('/metrics');
             const text = await response.text();
+            const approved = metricValue(text, 'txn_verdict_total', 'verdict="APPROVED"');
+            const blocked = metricValue(text, 'txn_verdict_total', 'verdict="BLOCKED"');
+            const otpRequired = metricValue(text, 'txn_verdict_total', 'verdict="OTP_REQUIRED"');
+            const total = approved + blocked + otpRequired;
+            const otpSuccess = metricValue(text, 'otp_success_total');
+            const otpFailed = metricValue(text, 'otp_failure_total');
+            const otpTotal = otpSuccess + otpFailed;
+
+            document.getElementById('fraud-rate').textContent =
+              total ? `${Math.round((blocked / total) * 100)}%` : '0%';
+            document.getElementById('otp-rate').textContent =
+              otpTotal ? `${Math.round((otpSuccess / otpTotal) * 100)}%` : '0%';
             document.getElementById('metrics').textContent = text;
           }
           loadMetrics();
