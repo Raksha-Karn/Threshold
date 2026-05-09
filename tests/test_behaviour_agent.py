@@ -5,7 +5,7 @@ import torch
 from sklearn.preprocessing import StandardScaler
 
 from agents.behaviour_agent import BehaviourAgent
-from lstm_autoencoder import BehaviourLSTMPredictor
+from features.lstm_autoencoder import BehaviourLSTMPredictor
 
 
 def test_behaviour_agent_returns_float_score(tmp_path):

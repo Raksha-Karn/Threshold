@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from lstm_autoencoder import BehaviourLSTMPredictor
+from features.lstm_autoencoder import BehaviourLSTMPredictor
 import mlflow
 import mlflow.pytorch
 

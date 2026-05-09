@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 import joblib
 from torch import nn
 import pandas as pd
-from lstm_autoencoder import BehaviourLSTMPredictor
+from features.lstm_autoencoder import BehaviourLSTMPredictor
 
 
 class BehaviourAgent:
