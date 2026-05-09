@@ -8,6 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
+from monitoring.metrics import (
+    FRAUD_SCORE_HISTOGRAM,
+    VERDICT_COUNTER,
+    OTP_SUCCESS_COUNTER,
+    OTP_FAILURE_COUNTER,
+)
 from agents.synthesis_agent import SynthesisAgent
 from agents.anomaly_agent import AnomalyAgent
 from agents.behaviour_agent import BehaviourAgent
@@ -66,7 +72,7 @@ class FraudOrchestrator:
             agents_scores = await self._run_agents_concurrent(txn)
             
             all_scores = {
-                "synthesis": fraud_score.get("final_score", 0.0),
+                "synthesis": fraud_score.score,
                 "anomaly": agents_scores.get("anomaly", 0.0),
                 "behaviour": agents_scores.get("behaviour", 0.0),
                 "risk": agents_scores.get("risk", 0.0),
@@ -83,6 +89,9 @@ class FraudOrchestrator:
                 verdict = "OTP_REQUIRED"
             else:
                 verdict = "BLOCKED"
+            
+            FRAUD_SCORE_HISTOGRAM.observe(final_score)
+            VERDICT_COUNTER.labels(verdict=verdict).inc()
             
             result = {
                 "txn_id": txn_id,
@@ -115,27 +124,38 @@ class FraudOrchestrator:
 
     def _check_velocity(self, txn: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            result = self.velocity_agent.check_transaction(txn)
-            return result
+            if self.velocity_agent.is_suspicious(txn):
+                return {"blocked": True}
+            return {}
         except Exception:
             return {}
 
     async def _run_agents_concurrent(self, txn: Dict[str, Any]) -> Dict[str, float]:
         try:
-            anomaly_task = asyncio.to_thread(self.anomaly_agent.score_transaction, txn)
-            behaviour_task = asyncio.to_thread(self.behaviour_agent.score_transaction, txn)
-            risk_task = asyncio.to_thread(self.risk_agent.score_transaction, txn)
-            velocity_task = asyncio.to_thread(self.velocity_agent.score_transaction, txn)
+            loop = asyncio.get_running_loop()
+            anomaly_task = loop.run_in_executor(self.executor, self.anomaly_agent.score, txn)
+            behaviour_task = loop.run_in_executor(self.executor, self.behaviour_agent.score, txn.get("user_id"), txn)
+            risk_task = loop.run_in_executor(self.executor, self.risk_agent.score, txn.get("user_id"), txn)
+            velocity_task = loop.run_in_executor(self.executor, self.velocity_agent.score, txn)
             
             scores = await asyncio.gather(
                 anomaly_task, behaviour_task, risk_task, velocity_task,
                 return_exceptions=True
             )
             
+            risk_value = 0.0
+            if not isinstance(scores[2], Exception) and isinstance(scores[2], dict):
+                risk_value = float(scores[2].get("final_score", 0.0))
+            elif not isinstance(scores[2], Exception):
+                try:
+                    risk_value = float(scores[2])
+                except Exception:
+                    risk_value = 0.0
+
             return {
                 "anomaly": float(scores[0]) if not isinstance(scores[0], Exception) else 0.0,
                 "behaviour": float(scores[1]) if not isinstance(scores[1], Exception) else 0.0,
-                "risk": float(scores[2]) if not isinstance(scores[2], Exception) else 0.0,
+                "risk": risk_value,
                 "velocity": float(scores[3]) if not isinstance(scores[3], Exception) else 0.0,
             }
         except Exception:
@@ -181,9 +201,14 @@ class FraudOrchestrator:
             }
             
             self.redis_client.setex(f"txn:{txn_id}:otp_verdict", 3600, verdict)
+            if verdict == "APPROVED":
+                OTP_SUCCESS_COUNTER.inc()
+            else:
+                OTP_FAILURE_COUNTER.inc()
             return result
             
         except Exception as e:
+            OTP_FAILURE_COUNTER.inc()
             return {
                 "txn_id": txn_id,
                 "verdict": "ERROR",
