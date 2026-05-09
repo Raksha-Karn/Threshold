@@ -13,3 +13,4 @@ wheels/
 data/
 mlartifacts/
 mlflow.db
+.mlruns
