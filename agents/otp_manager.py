@@ -62,14 +62,23 @@ class OTPManager:
         return {"sms": sms_code, "email": email_code}
 
     def get_status(self, txn_id: str) -> Dict[str, Optional[str]]:
+        pipeline = self.redis_client.pipeline()
+        pipeline.get(self._state_key(txn_id))
+        pipeline.get(self._attempts_key(txn_id))
+        pipeline.get(self._deliver_flag_key(txn_id, "sms"))
+        pipeline.get(self._deliver_flag_key(txn_id, "email"))
+        pipeline.get(self._confirmed_at_key(txn_id, "sms"))
+        pipeline.get(self._confirmed_at_key(txn_id, "email"))
+        state, attempts, sms_delivered, email_delivered, sms_confirmed_at, email_confirmed_at = pipeline.execute()
+
         return {
             "txn_id": txn_id,
-            "status": self._status(txn_id),
-            "attempts": self.redis_client.get(self._attempts_key(txn_id)) or "0",
-            "sms_delivered": self.redis_client.get(self._deliver_flag_key(txn_id, "sms")) or "0",
-            "email_delivered": self.redis_client.get(self._deliver_flag_key(txn_id, "email")) or "0",
-            "sms_confirmed_at": self.redis_client.get(self._confirmed_at_key(txn_id, "sms")),
-            "email_confirmed_at": self.redis_client.get(self._confirmed_at_key(txn_id, "email")),
+            "status": state or "PENDING_DUAL",
+            "attempts": attempts or "0",
+            "sms_delivered": sms_delivered or "0",
+            "email_delivered": email_delivered or "0",
+            "sms_confirmed_at": sms_confirmed_at,
+            "email_confirmed_at": email_confirmed_at,
         }
 
     def _increment_attempts(self, txn_id: str) -> int:
