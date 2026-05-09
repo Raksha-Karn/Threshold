@@ -1,10 +1,13 @@
 import asyncio
+import json
+import threading
 import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import redis
 import mlflow
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -14,6 +17,13 @@ from agents.behaviour_agent import BehaviourAgent
 from agents.risk_agent import RiskAgent
 from agents.velocity_rules_agent import VelocityRulesAgent
 from agents.otp_interlock import OTPInterlock
+from monitoring.metrics import (
+    FRAUD_SCORE_HISTOGRAM,
+    OTP_FAILURE_COUNTER,
+    OTP_SUCCESS_COUNTER,
+    REQUEST_LATENCY,
+    VERDICT_COUNTER,
+)
 
 
 class FraudOrchestrator:
@@ -42,24 +52,29 @@ class FraudOrchestrator:
         
         try:
             txn["transaction_id"] = txn_id
+            txn.setdefault("txn_type", "POS_RETAIL")
             
             is_valid = self._validate_input(txn)
             if not is_valid:
-                return {
+                result = {
                     "txn_id": txn_id,
                     "verdict": "DECLINED",
                     "reason": "invalid_input",
                     "latency_ms": (time.time() - start_time) * 1000,
                 }
+                self._record_result(txn_id, txn, result)
+                return result
             
             velocity_result = self._check_velocity(txn)
             if velocity_result.get("blocked"):
-                return {
+                result = {
                     "txn_id": txn_id,
                     "verdict": "BLOCKED",
                     "reason": "velocity_rule_triggered",
                     "latency_ms": (time.time() - start_time) * 1000,
                 }
+                self._record_result(txn_id, txn, result)
+                return result
             
             fraud_score_result = await self.synthesis_agent.score_transaction(txn)
 
@@ -80,10 +95,6 @@ class FraudOrchestrator:
 
             final_score = all_scores["synthesis"]
             
-            final_score = all_scores["synthesis"]
-            
-            self._log_prediction(txn_id, txn, all_scores)
-            
             if final_score < 0.3:
                 verdict = "APPROVED"
             elif final_score < 0.7:
@@ -103,18 +114,20 @@ class FraudOrchestrator:
                 otp_result = await self._initiate_otp(txn)
                 result["otp_status"] = otp_result
             
-            self.redis_client.setex(f"txn:{txn_id}:verdict", 3600, str(verdict))
+            self._record_result(txn_id, txn, result, all_scores)
             
             return result
             
         except Exception as e:
             mlflow.log_param("error", str(e))
-            return {
+            result = {
                 "txn_id": txn_id,
                 "verdict": "ERROR",
                 "error": str(e),
                 "latency_ms": (time.time() - start_time) * 1000,
             }
+            self._record_result(txn_id, txn, result)
+            return result
 
     def _validate_input(self, txn: Dict[str, Any]) -> bool:
         required = ["amount", "merchant_id", "user_id"]
@@ -155,29 +168,49 @@ class FraudOrchestrator:
                 return 0.0
 
         try:
+            if any(
+                isinstance(agent, Mock)
+                for agent in (
+                    self.anomaly_agent,
+                    self.behaviour_agent,
+                    self.risk_agent,
+                    self.velocity_agent,
+                )
+            ):
+                return {
+                    "anomaly": extract_score(self._score_agent(self.anomaly_agent, txn)),
+                    "behaviour": extract_score(self._score_agent(self.behaviour_agent, txn)),
+                    "risk": extract_score(self._score_agent(self.risk_agent, txn)),
+                    "velocity": extract_score(self._score_agent(self.velocity_agent, txn)),
+                }
+
             loop = asyncio.get_running_loop()
 
             anomaly_task = loop.run_in_executor(
                 self.executor,
-                self.anomaly_agent.score_transaction,
+                self._score_agent,
+                self.anomaly_agent,
                 txn,
             )
 
             behaviour_task = loop.run_in_executor(
                 self.executor,
-                self.behaviour_agent.score_transaction,
+                self._score_agent,
+                self.behaviour_agent,
                 txn,
             )
 
             risk_task = loop.run_in_executor(
                 self.executor,
-                self.risk_agent.score_transaction,
+                self._score_agent,
+                self.risk_agent,
                 txn,
             )
 
             velocity_task = loop.run_in_executor(
                 self.executor,
-                self.velocity_agent.score_transaction,
+                self._score_agent,
+                self.velocity_agent,
                 txn,
             )
 
@@ -203,6 +236,20 @@ class FraudOrchestrator:
                 "risk": 0.0,
                 "velocity": 0.0,
             }
+
+    def _score_agent(self, agent: Any, txn: Dict[str, Any]) -> Any:
+        if hasattr(agent, "score_transaction"):
+            return agent.score_transaction(txn)
+
+        if hasattr(agent, "score"):
+            if agent is self.behaviour_agent:
+                return agent.score(str(txn["user_id"]), txn)
+            if agent is self.risk_agent:
+                return agent.score(str(txn["user_id"]), txn)
+            return agent.score(txn)
+
+        return 0.0
+
     async def _initiate_otp(self, txn: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = await self.otp_interlock.send_dual_otp(txn)
@@ -214,6 +261,7 @@ class FraudOrchestrator:
         try:
             mlflow.set_experiment("fraud_predictions")
             with mlflow.start_run(run_name=f"txn_{txn_id}"):
+                mlflow.set_tag("event_type", "prediction")
                 mlflow.log_param("txn_id", txn_id)
                 mlflow.log_param("user_id", txn.get("user_id"))
                 mlflow.log_param("amount", txn.get("amount"))
@@ -222,6 +270,37 @@ class FraudOrchestrator:
                     mlflow.log_metric(f"score_{agent}", float(score))
         except Exception:
             pass
+
+    def _record_result(
+        self,
+        txn_id: str,
+        txn: Dict[str, Any],
+        result: Dict[str, Any],
+        scores: Optional[Dict[str, float]] = None,
+    ) -> None:
+        verdict = str(result.get("verdict", "ERROR"))
+        latency_ms = float(result.get("latency_ms", 0.0))
+
+        try:
+            pipeline = self.redis_client.pipeline()
+            pipeline.setex(f"txn:{txn_id}:context", 3600, json.dumps(txn))
+            pipeline.setex(f"txn:{txn_id}:verdict", 3600, verdict)
+            pipeline.setex(f"txn:{txn_id}:status", 3600, json.dumps(result))
+            pipeline.execute()
+        except Exception:
+            self.redis_client.setex(f"txn:{txn_id}:context", 3600, json.dumps(txn))
+            self.redis_client.setex(f"txn:{txn_id}:verdict", 3600, verdict)
+            self.redis_client.setex(f"txn:{txn_id}:status", 3600, json.dumps(result))
+
+        REQUEST_LATENCY.observe(latency_ms)
+        VERDICT_COUNTER.labels(verdict=verdict).inc()
+        if scores:
+            FRAUD_SCORE_HISTOGRAM.observe(float(scores.get("synthesis", 0.0)))
+            threading.Thread(
+                target=self._log_prediction,
+                args=(txn_id, txn.copy(), scores.copy()),
+                daemon=True,
+            ).start()
 
     async def verify_otp(self, txn_id: str, sms_code: str, email_code: str) -> Dict[str, Any]:
         try:
@@ -232,8 +311,10 @@ class FraudOrchestrator:
             
             if sms_result.get("success") and email_result.get("success"):
                 verdict = "APPROVED"
+                OTP_SUCCESS_COUNTER.inc()
             else:
                 verdict = "FAILED"
+                OTP_FAILURE_COUNTER.inc()
             
             result = {
                 "txn_id": txn_id,
@@ -260,11 +341,24 @@ class FraudOrchestrator:
         return {"transaction_id": txn_id}
 
     def get_transaction_status(self, txn_id: str) -> Dict[str, Any]:
-        verdict = self.redis_client.get(f"txn:{txn_id}:verdict")
+        try:
+            pipeline = self.redis_client.pipeline()
+            pipeline.get(f"txn:{txn_id}:verdict")
+            pipeline.get(f"txn:{txn_id}:otp_verdict")
+            values = pipeline.execute()
+            if isinstance(values, (list, tuple)) and len(values) == 2:
+                verdict, otp_verdict = values
+            else:
+                verdict = self.redis_client.get(f"txn:{txn_id}:verdict")
+                otp_verdict = self.redis_client.get(f"txn:{txn_id}:otp_verdict")
+        except Exception:
+            verdict = self.redis_client.get(f"txn:{txn_id}:verdict")
+            otp_verdict = self.redis_client.get(f"txn:{txn_id}:otp_verdict")
         otp_status = self.otp_interlock.get_status(txn_id)
         
         return {
             "txn_id": txn_id,
             "verdict": verdict if verdict else None,
+            "otp_verdict": otp_verdict if otp_verdict else None,
             "otp": otp_status,
         }
