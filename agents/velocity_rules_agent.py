@@ -184,6 +184,44 @@ class VelocityRulesAgent:
 
         return features
 
+    def check_transaction(
+        self,
+        transaction: dict,
+        window_seconds: int = 10 * 60,
+        max_transactions: int = 15,
+    ) -> dict:
+        if "user_id" not in transaction:
+            return {"blocked": False, "reason": "missing_user_id"}
+
+        user_id = str(transaction["user_id"])
+        current_timestamp = float(transaction.get("timestamp_epoch", time.time()))
+        recent_transactions = self._get_recent_transactions(
+            user_id=user_id,
+            current_timestamp=current_timestamp,
+            window_seconds=window_seconds,
+        )
+        projected_count = len(recent_transactions) + 1
+
+        self._store_transaction(
+            user_id=user_id,
+            transaction=transaction,
+            current_timestamp=current_timestamp,
+        )
+
+        if projected_count >= max_transactions:
+            return {
+                "blocked": True,
+                "reason": "velocity_threshold_exceeded",
+                "count": projected_count,
+                "window_seconds": window_seconds,
+            }
+
+        return {
+            "blocked": False,
+            "count": projected_count,
+            "window_seconds": window_seconds,
+        }
+
     def score(self, transaction: dict, update_redis: bool = True) -> float:
         if "user_id" not in transaction:
             raise ValueError("Transaction must include user_id.")
