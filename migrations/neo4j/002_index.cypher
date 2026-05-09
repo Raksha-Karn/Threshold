@@ -4,6 +4,12 @@ FOR (t:Transaction) ON (t.timestamp);
 CREATE INDEX transaction_amount IF NOT EXISTS
 FOR (t:Transaction) ON (t.amount);
 
+CREATE INDEX transaction_txn_id IF NOT EXISTS
+FOR (t:Transaction) ON (t.txn_id);
+
+CREATE INDEX user_user_id IF NOT EXISTS
+FOR (u:User) ON (u.user_id);
+
 CREATE INDEX user_email IF NOT EXISTS
 FOR (u:User) ON (u.email);
 
