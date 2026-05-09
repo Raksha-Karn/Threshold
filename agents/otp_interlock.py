@@ -78,6 +78,9 @@ class OTPInterlock:
     def get_status(self, txn_id: str) -> Dict[str, Any]:
         return self.otp_manager.get_status(txn_id)
 
+    def is_frozen(self, txn_id: str) -> bool:
+        return self.otp_manager.redis_client.get(f"otp:{txn_id}:frozen") == "1"
+
     async def _apply_defenses(self, txn_id: str, txn: Dict[str, Any], channel: str, result: Dict[str, Any]):
         if not result.get("success"):
             if result.get("status") == "FAILED":
@@ -136,6 +139,7 @@ class OTPInterlock:
         self._log_event(txn_id, "out_of_band", "push_notification_sent")
 
     def _log_event(self, txn_id: str, event_type: str, detail: str):
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
         mlflow.set_experiment("otp_interlock")
         with mlflow.start_run(run_name=f"otp_{txn_id}"):
             mlflow.log_param("txn_id", txn_id)
