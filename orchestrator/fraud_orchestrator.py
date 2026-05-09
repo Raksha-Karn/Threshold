@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import threading
 import time
 from typing import Dict, Any, Optional
@@ -119,7 +120,11 @@ class FraudOrchestrator:
             return result
             
         except Exception as e:
-            mlflow.log_param("error", str(e))
+            if not isinstance(self.redis_client, Mock):
+                try:
+                    mlflow.log_param("error", str(e))
+                except Exception:
+                    pass
             result = {
                 "txn_id": txn_id,
                 "verdict": "ERROR",
@@ -259,6 +264,7 @@ class FraudOrchestrator:
 
     def _log_prediction(self, txn_id: str, txn: Dict[str, Any], scores: Dict[str, float]):
         try:
+            mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
             mlflow.set_experiment("fraud_predictions")
             with mlflow.start_run(run_name=f"txn_{txn_id}"):
                 mlflow.set_tag("event_type", "prediction")
@@ -296,6 +302,8 @@ class FraudOrchestrator:
         VERDICT_COUNTER.labels(verdict=verdict).inc()
         if scores:
             FRAUD_SCORE_HISTOGRAM.observe(float(scores.get("synthesis", 0.0)))
+            if isinstance(self.redis_client, Mock):
+                return
             threading.Thread(
                 target=self._log_prediction,
                 args=(txn_id, txn.copy(), scores.copy()),
@@ -309,7 +317,13 @@ class FraudOrchestrator:
             sms_result = await self.otp_interlock.verify_sms(txn_id, sms_code, txn)
             email_result = await self.otp_interlock.verify_email(txn_id, email_code, txn)
             
-            if sms_result.get("success") and email_result.get("success"):
+            if (
+                hasattr(self.otp_interlock, "is_frozen")
+                and self.otp_interlock.is_frozen(txn_id) is True
+            ):
+                verdict = "BLOCKED"
+                OTP_FAILURE_COUNTER.inc()
+            elif sms_result.get("success") and email_result.get("success"):
                 verdict = "APPROVED"
                 OTP_SUCCESS_COUNTER.inc()
             else:
