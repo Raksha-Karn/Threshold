@@ -1,7 +1,8 @@
 import os
 import json
-from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException
+from typing import Optional, Any
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.responses import Response, HTMLResponse
 from pydantic import BaseModel
 import redis
 from neo4j import GraphDatabase
@@ -9,6 +10,14 @@ from dotenv import load_dotenv
 import time
 from pathlib import Path
 import sys
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from monitoring.metrics import (
+    REQUEST_LATENCY,
+    FRAUD_SCORE_HISTOGRAM,
+    VERDICT_COUNTER,
+    OTP_SUCCESS_COUNTER,
+    OTP_FAILURE_COUNTER,
+)
 from agents.synthesis_agent import SynthesisAgent
 from agents.anomaly_agent import AnomalyAgent
 from agents.behaviour_agent import BehaviourAgent
@@ -27,6 +36,7 @@ load_dotenv()
 app = FastAPI(title="Fraud Detection Orchestrator", version="1.0.0")
 
 redis_client: Optional[redis.Redis] = None
+neo4j_driver: Optional[Any] = None
 fraud_orchestrator: Optional[FraudOrchestrator] = None
 
 
@@ -42,7 +52,23 @@ def get_redis() -> redis.Redis:
     return redis_client
 
 
-def get_orchestrator(redis: redis.Redis = Depends(get_redis)) -> FraudOrchestrator:
+def get_neo4j_driver() -> Any:
+    global neo4j_driver
+    if neo4j_driver is None:
+        neo4j_driver = GraphDatabase.driver(
+            os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            auth=(
+                os.getenv("NEO4J_USER", "neo4j"),
+                os.getenv("NEO4J_PASSWORD", "password"),
+            ),
+        )
+    return neo4j_driver
+
+
+def get_orchestrator(
+    redis: redis.Redis = Depends(get_redis),
+    neo4j: Any = Depends(get_neo4j_driver),
+) -> FraudOrchestrator:
     global fraud_orchestrator
     if fraud_orchestrator is None:
         synthesis_agent = SynthesisAgent()
@@ -57,6 +83,7 @@ def get_orchestrator(redis: redis.Redis = Depends(get_redis)) -> FraudOrchestrat
             otp_manager=otp_manager,
             sms_agent=sms_agent,
             email_agent=email_agent,
+            neo4j_driver=neo4j,
         )
         fraud_orchestrator = FraudOrchestrator(
             synthesis_agent=synthesis_agent,
@@ -88,10 +115,19 @@ class OTPVerifyRequest(BaseModel):
     email_code: str
 
 
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    elapsed_ms = (time.time() - start_time) * 1000
+    REQUEST_LATENCY.observe(elapsed_ms)
+    return response
+
+
 @app.on_event("startup")
 async def startup():
-    redis = get_redis()
-    redis.ping()
+    get_redis().ping()
+    get_neo4j_driver()
 
 
 @app.post("/transaction")
@@ -130,6 +166,43 @@ async def get_transaction_status(
 ):
     result = orchestrator.get_transaction_status(txn_id)
     return result
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/dashboard")
+def dashboard() -> HTMLResponse:
+    html = """
+    <html>
+      <head>
+        <title>Fraud Orchestrator Dashboard</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 24px; }
+          .metric { margin-bottom: 16px; }
+          pre { background: #f4f4f4; padding: 16px; border-radius: 8px; }
+        </style>
+      </head>
+      <body>
+        <h1>Fraud Orchestrator Dashboard</h1>
+        <div class="metric"><strong>Metrics Endpoint:</strong> <a href="/metrics">/metrics</a></div>
+        <div class="metric"><strong>Latest Metrics</strong></div>
+        <pre id="metrics">Loading metrics...</pre>
+        <script>
+          async function loadMetrics() {
+            const response = await fetch('/metrics');
+            const text = await response.text();
+            document.getElementById('metrics').textContent = text;
+          }
+          loadMetrics();
+          setInterval(loadMetrics, 5000);
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 @app.get("/health")
