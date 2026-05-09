@@ -60,3 +60,30 @@ class GraphAgent:
 
     def is_suspicious(self, user_id: str, threshold: float = 0.5) -> bool:
         return self.score(user_id) >= threshold
+
+    @staticmethod
+    def detect_shared_device_ring(
+        transactions: list[dict],
+        min_accounts: int = 3,
+    ) -> dict:
+        device_to_users: dict[str, set[str]] = {}
+
+        for transaction in transactions:
+            device_id = transaction.get("device_id")
+            user_id = transaction.get("user_id")
+            if not device_id or not user_id:
+                continue
+            device_to_users.setdefault(str(device_id), set()).add(str(user_id))
+
+        risky_devices = {
+            device_id: sorted(user_ids)
+            for device_id, user_ids in device_to_users.items()
+            if len(user_ids) >= min_accounts
+        }
+
+        return {
+            "flagged": bool(risky_devices),
+            "score": 1.0 if risky_devices else 0.0,
+            "risky_devices": risky_devices,
+            "reason": "shared_device_fraud_ring" if risky_devices else "no_shared_device_ring",
+        }
